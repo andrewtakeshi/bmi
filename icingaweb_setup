@@ -1,0 +1,53 @@
+#!/bin/bash
+
+echo "******************************************"
+echo "** Beginning Installation of IcingaWeb2 **"
+echo "******************************************"
+
+# Assumes that icinga_setup was run prior to this, so SELinux
+# is already turned off, epel-release has been added, and Icinga
+# official repo has been added. 
+
+echo "Enabling SCL repository."
+yum install -y centos-release-scl #/dev/null 2>&1
+
+echo "Installing required PHP packages."
+yum install -y rh-php71-php-json rh-php71-php-pgsql rh-php71-php-xml rh-php71-php-intl rh-php71-php-common rh-php71-php-pdo rh-php71-php-mysqlnd rh-php71-php-cli rh-php71-php-mbstring rh-php71-php-fpm rh-php71-php-gd rh-php71-php-zip rh-php71-php-ldap rh-php71-php-imagick #/dev/null 2>&1
+
+echo "Modifying php.ini to have the correct time zone."
+sed -in 's/;date.timezone/date.timezone=America\/Denver/g' #/dev/null 2>&1
+
+echo "Enabling php-fpm."
+systemctl enable rh-php71-php-fpm --now #/dev/null 2>&1
+# systemctl restart rh-php71-php-fpm #/dev/null 2>&1
+
+echo "Installing icingaweb2, icingacli, and httpd (apache webserver)."
+yum install -y icingaweb2 icingacli httpd #/dev/null 2>&1
+
+systemctl enable httpd --now #/dev/null 2>&1
+
+firewall-cmd --permanent --add-service=http --zone=public #/dev/null 2>&1
+firewall-cmd --reload #/dev/null 2>&1
+
+groupadd -r icingaweb2 #/dev/null 2>&1
+usermod -a -G icingaweb2 apache #/dev/null 2>&1
+
+icingacli setup config directory --group icingaweb2 #/dev/null 2>&1
+
+systemctl restart httpd rh-php71-php-fpm #/dev/null 2>&1
+
+TOKEN=$(icingacli setup token create)
+
+mysql --execute="create database icingawebdb; grant all privileges on icingawebdb.* to icingaweb@localhost identified by 'icinga123';"
+
+icinga2 api setup
+
+systemctl restart icinga2
+
+PASS=$(grep password /etc/icinga2/conf.d/api-users.conf)
+
+echo "Set up the rest from web interface, available at http://localhost/icingaweb2"
+printf "Setup Token:\n\t$TOKEN\n"
+printf "Database Resource:\n\tdb name = icingawebdb\n\tuser = icingaweb\n\tpassword = icinga123\n"
+printf "IDO Resource:\n\tdb name = icinga2\n\tuser = icinga2\n\tpasswrod = icinga123\n"
+printf "API Configuration:\n\thost = localhost\n\tuser = root\n      $PASS\n"

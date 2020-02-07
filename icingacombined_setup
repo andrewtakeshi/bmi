@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# This script is meant to be run as root on a clean minimal installation of CentOS 7.6.
+# If all works properly, it should set up everything to have a working Icinga/IcingaWeb2 installation. 
+
+if [ $(whoami) != "root" ]; then
+    echo "This script needs to be run as root."
+    exit 0
+else
+    :
+fi
+
+echo "***************************************"
+echo "** Beginning Installation of Icinga2 **"
+echo "***************************************"
+
+# Change SELinux status. 
+SEFILE=/etc/selinux/config
+echo "Turning off SELinux"
+if [ -f $SEFILE ]; then
+    sed -i 's/^SELINUX=[[:alpha:]]\+$/SELINUX=disabled/' $SEFILE > /dev/null 2>&1
+    setenforce 0 > /dev/null 2>&1
+else
+    echo "SELinux file not found. Exiting."
+    exit 0
+fi
+
+# Add epel-release repository.
+echo "Adding epel-release repository." 
+yum install -y epel-release > /dev/null 2>&1
+
+# Get Icinga official repo + key.
+echo "Adding Icinga official repository."
+rpm --import https://packages.icinga.com/icinga.key > /dev/null 2>&1
+yum install -y https://packages.icinga.com/epel/icinga-rpm-release-7-latest.noarch.rpm > /dev/null 2>&1
+
+echo "Installing and starting Icinga2. Also installing nagios plugins."
+yum install -y icinga2 nagios-plugins-all > /dev/null 2>&1
+systemctl enable icinga2 --now > /dev/null 2>&1
+
+echo "Installing and starting mariaDB (mysql). After this script finishes, you should secure the installation with the \"mysql_secure_installation\" command."
+yum install -y mariadb-server mariadb > /dev/null 2>&1
+systemctl enable mariadb --now > /dev/null 2>&1
+
+echo "Installing IDO modules for mysql."
+yum install -y icinga2-ido-mysql > /dev/null 2>&1
+
+echo "Creating database for IDO modules and importing Icinga2 IDO schema into database."
+
+mysql --execute="create database icinga2; grant all privileges on icinga2.* to icinga2@localhost identified by 'icinga123'; flush privileges;" > /dev/null 2>&1
+
+mysql icinga2 < /usr/share/icinga2-ido-mysql/schema/mysql.sql > /dev/null 2>&1
+
+icinga2 feature enable ido-mysql > /dev/null 2>&1
+icinga2 feature enable command > /dev/null 2>&1
+
+printf "object IdoMysqlConnection \"ido-mysql\" {\n\tuser = \"icinga2\",\n\tpassword=\"icinga123\",\n\thost=\"localhost\",\n\tdatabase = \"icinga2\"\n}" > /etc/icinga2/features-enabled/ido-mysql.conf
+
+echo "Restarting Icinga2."
+systemctl restart icinga2 > /dev/null 2>&1
+
+echo "Configuring firewall."
+firewall-cmd --permanent --add-port=5665/tcp --zone=public > /dev/null 2>&1
+firewall-cmd --reload > /dev/null 2>&1
+
+echo "******************************************"
+echo "** Beginning Installation of IcingaWeb2 **"
+echo "******************************************"
+
+# Assumes that icinga_setup was run prior to this, so SELinux
+# is already turned off, epel-release has been added, and Icinga
+# official repo has been added. 
+
+echo "Enabling SCL repository."
+yum install -y centos-release-scl > /dev/null 2>&1
+
+echo "Installing required PHP packages."
+yum install -y rh-php71-php-json rh-php71-php-pgsql rh-php71-php-xml rh-php71-php-intl rh-php71-php-common rh-php71-php-pdo rh-php71-php-mysqlnd rh-php71-php-cli rh-php71-php-mbstring rh-php71-php-fpm rh-php71-php-gd rh-php71-php-zip rh-php71-php-ldap rh-php71-php-imagick > /dev/null 2>&1
+
+echo "Modifying php.ini to have the correct time zone."
+sed -in 's/;date.timezone/date.timezone=America\/Denver/g' > /dev/null 2>&1
+
+echo "Enabling php-fpm."
+systemctl enable rh-php71-php-fpm --now > /dev/null 2>&1
+# systemctl restart rh-php71-php-fpm > /dev/null 2>&1
+
+echo "Installing icingaweb2, icingacli, and httpd (apache webserver)."
+yum install -y icingaweb2 icingacli httpd > /dev/null 2>&1
+
+systemctl enable httpd --now > /dev/null 2>&1
+
+firewall-cmd --permanent --add-service=http --zone=public > /dev/null 2>&1
+firewall-cmd --reload > /dev/null 2>&1
+
+groupadd -r icingaweb2 > /dev/null 2>&1
+usermod -a -G icingaweb2 apache > /dev/null 2>&1
+
+icingacli setup config directory --group icingaweb2 > /dev/null 2>&1
+
+systemctl restart httpd rh-php71-php-fpm > /dev/null 2>&1
+
+TOKEN=$(icingacli setup token create) > /dev/null 2>&1
+
+mysql --execute="create database icingawebdb; grant all privileges on icingawebdb.* to icingaweb@localhost identified by 'icinga123';" > /dev/null 2>&1
+
+icinga2 api setup > /dev/null 2>&1
+
+systemctl restart icinga2 > /dev/null 2>&1
+
+PASS=$(grep password /etc/icinga2/conf.d/api-users.conf) > /dev/null 2>&1
+
+echo "Set up the rest from web interface, available at http://localhost/icingaweb2" | tee icingadetails.log
+printf "Setup Token:\n\t$TOKEN\n" | tee -a icingadetails.log
+printf "Database Resource:\n\tdb name = icingawebdb\n\tuser = icingaweb\n\tpassword = icinga123\n" | tee -a icingadetails.log
+printf "IDO Resource:\n\tdb name = icinga2\n\tuser = icinga2\n\tpassword = icinga123\n" | tee -a icingadetails.log
+printf "API Configuration:\n\thost = localhost\n\tuser = root\n      $PASS\n" | tee -a icingadetails.log

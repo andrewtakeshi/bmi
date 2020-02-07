@@ -1,0 +1,566 @@
+#!/usr/bin/perl -w
+
+# SUMMARY: To get cpu, ram, load, swap info via snmp for Nagios
+
+use lib '/usr/local/nagios/libexec';
+use utils qw(%ERRORS);
+use strict;
+
+my $VERSION = '1.9.2';
+my $UPDATE = '03.17.2011';
+
+my $SNMPDIR = '/usr/bin';
+my $D = 0;
+
+
+####------------- CHANGE LOGS ----------------####
+#
+# 10/26/2004 by BParish
+# Initial build
+#
+# 01/16/2006 by BParish
+# Added a second mechanism on SWAP check, using UCB OIDs if HrStorage fails
+#
+# 05/05/2009 by BParish
+# Modified paths for use with Ubuntu, and variablized where possible
+#
+# 05/07/2009 by BParish
+# Modified SNMP section to be more flexible on values returned
+#
+# 05/17/2009 by BParish
+# Added 'use strict', imported %ERRORS and other requirements now forced in Nagios 3.x
+#
+# 10/21/2009 by BParish
+# Converted RAM to allow percentages or percent/MB mix 
+# Now works with Linux
+# Uses snmpwalk instead of get
+# Can specify if alarm is triggered when RAM used rises above or RAM free drops below threshold 
+#   NOTE:  If check returns 'OK', result will be expressed in $WARNING units (MB|%)
+# Improved logging
+#
+# 05/07/2010 by BParish
+# Changed RAM to accomodate new ZFS RAM usage.  See this article by Justin Ellison:
+#    http://www.sysadminsjourney.com/content/2009/06/05/new-and-improved-checkmempl-nagios-plugin
+#    I took his script and hard coded the -C option (to report on caches).  Push this out as
+#    /usr/local/nagios/libexec/snmpd_check_mem to all Solaris 10/ZFS boxes.  Then add this line:
+#  	extend checkmem /usr/local/nagios/libexec/snmpd_check_mem
+#     to the end of the snmpd.conf file on those hosts.
+#    For boxes running (SMA) Solaris version of SNMPd (5.0.9 at the time of this writing) add:
+#       exec checkmem /usr/local/bin/perl /usr/local/nagios/libexec/snmpd_check_mem
+#     to the end of the /etc/sma/snmp/snmpd.conf file
+#
+# 05/26/2010 by BParish
+# Moved all checks to -v 2c.  
+#
+# 06/16/2010 by BParish
+# Added a SSH fallback for Solaris containers that cannot run SNMPd
+#
+# 03/17/2011 by BParish
+# Fixed an error in the processing of SWAP percentages
+#
+####------------------------------------------####
+
+
+
+my $counter=0;
+my ($argument, $HOST, $PASS, $WARNING, $CRITICAL, $OPTION);
+my $WP = '';
+my $CP = '';
+
+foreach $argument (@ARGV) {
+   $counter++;
+   usage() if ($argument =~ m/^-{1,2}h/);
+   if ($argument =~ m/^-{1,2}v/i) { 
+     print "$0 version $VERSION last updated $UPDATE\n";
+     exit $ERRORS{'OK'};
+   }
+   if ($argument =~ m/^-{1,2}d/i) {
+      $D = $ARGV[$counter];
+      print "Debug set to level $D\n";
+   }
+   if ($argument =~ m/^-{1,2}H/) {
+      $HOST = $ARGV[$counter];
+   }
+   if ($argument =~ m/^-{1,2}p/i) {
+      $PASS = $ARGV[$counter];
+   }
+   if ($argument =~ m/^-{1,2}o/i) {
+      $OPTION = $ARGV[$counter];
+   }
+   if ($argument =~ m/^-{1,2}w/i) {
+     $WARNING = $ARGV[$counter];
+     if ($WARNING =~ m/\%/) {
+       $WP = '%';
+       $WARNING =~ s/\%//;
+     }
+   }
+   if ($argument =~ m/^-{1,2}c/i) {
+     $CRITICAL = $ARGV[$counter];
+     if ($CRITICAL =~ m/\%/) {
+       $CP = '%';
+       $CRITICAL =~ s/\%//;
+     }
+   }
+}
+
+my $LOGFILE="/tmp/nagios.log";
+
+if ($D > 0) {
+   open(LOG, ">$LOGFILE");
+}
+
+print LOG "Target set to $HOST\n" if ($D > 0);
+print LOG "Set password to $PASS\n" if ($D > 1);
+print LOG "Set threshold option to $OPTION\n" if ($OPTION && $D > 1);
+print LOG "WARNING IS A PERCENTAGE ($WARNING)%\n" if ($D > 1);
+print LOG "CRITICAL IS A PERCENTAGE ($CRITICAL)%\n" if ($D > 1);
+
+print "Command : $0\n" if ($D > 0);
+
+my @junk = split('\/',$0);
+my $program = pop(@junk);
+print LOG "Calling program is $program\n" if ($D > 3);
+
+if (! defined $HOST || ! defined $PASS) {
+  print "Missing Host or Password arguments\n";
+  &usage();
+     close(LOG) if ($D > 0);
+  exit $ERRORS{'UNKNOWN'};
+}
+$OPTION = 'below' if (! $OPTION || ($OPTION ne 'below' && $OPTION ne 'above'));
+$CP = 'MB' if ($CP ne '%');
+$WP = 'MB' if ($WP ne '%');
+
+#   ALERT CODES:
+my %ALERTLABEL = (
+ '0','OK',
+ '1','WARNING',
+ '2','CRITICAL',
+ '3','UNKNOWN',
+);
+
+my ($line, $keyword, $target, $value, $resul, $result);
+my (%SWAP, %RAM);
+
+my %OID = (
+  'SwapIn','UCD-SNMP-MIB::ssSwapIn.0',
+  'SwapOut','UCD-SNMP-MIB::ssSwapOut.0',
+  'SysInterrupts','UCD-SNMP-MIB::ssSysInterrupts.0',
+  'ContextSwitches','UCD-SNMP-MIB::ssSysContext.0',
+  'CPUUser','UCD-SNMP-MIB::ssCpuUser.0',
+  'CPUSystem','UCD-SNMP-MIB::ssCpuSystem.0',
+  'CPUIdle','UCD-SNMP-MIB::ssCpuIdle.0',
+  'load1','UCD-SNMP-MIB::laLoad.1',
+  'load5','UCD-SNMP-MIB::laLoad.2',
+  'load15','UCD-SNMP-MIB::laLoad.3',
+  'TotalSwap','UCD-SNMP-MIB::memTotalSwap.0',
+  'AvailSwap','UCD-SNMP-MIB::memAvailSwap.0',
+  'memTotalReal','UCD-SNMP-MIB::memTotalReal.0',
+  'memAvailReal','UCD-SNMP-MIB::memAvailReal.0',
+  'memTotalFree','UCD-SNMP-MIB::memTotalFree.0'
+);
+
+my ($freeram, $totalram, $usedram, $compare, $snmpworked);
+my (%memhash, @memwalk, $mempercentused, $mempercentfree);
+
+if ($program =~ m/ram/) {
+    @memwalk = `$SNMPDIR/snmpwalk -v2c -mALL -t 1 -r 4 -c $PASS $HOST UCD-SNMP-MIB::memory`;
+    if (scalar(@memwalk) < 2) {
+       $snmpworked=0;
+		# NO-GO ON SNMP, TRY SSH:
+       @memwalk = `/usr/bin/ssh $HOST '/usr/local/nagios/libexec/snmpd_check_mem'`;
+       if (scalar(@memwalk) < 2) {
+		# NOPE, NO SSH EITHER -- JUST HANG IT UP...
+          print "RAM ERROR: Unexpected SNMP results\n";
+          close(LOG) if ($D > 0);
+          exit $ERRORS{'UNKNOWN'};
+       }
+    } else {
+       $snmpworked=1;
+    } 
+    foreach $result (@memwalk) {
+       chomp($result);
+       if ($result =~ m/MIB::(\w+)\.0 = INTEGER:\s+(\d+)/) {
+          $memhash{$1} = $2;
+	  print LOG "\t$1 ==> $2\n" if ($D > 5);
+       }
+    }
+    if ($snmpworked > 0) {
+		#  SNMP WORKED, ALSO TRY SOLARIS 10 ZFS EXTENSION:
+       @memwalk = `$SNMPDIR/snmpwalk -v2c -t 1 -r 4 -c $PASS $HOST 'NET-SNMP-EXTEND-MIB::nsExtendOutputFull."checkmem"'`;
+       if (scalar(@memwalk) < 2) {
+          print LOG "RAM extension not installed\n" if ($D > 3);
+          my $execmem = `$SNMPDIR/snmpwalk -v2c -t 1 -r 4 -Ov -c $PASS $HOST UCD-SNMP-MIB::extOutput.1`;
+          if (! $execmem) {
+             print LOG "Alternate (SUN SMA agent) RAM extension not installed, either\n" if ($D > 3);
+          } else {
+             print LOG "Polling SUN SMA agent RAM extension\n" if ($D > 3);
+             print LOG "\t(Which returned: $execmem)\n" if ($D > 5);
+             foreach $result (split('\|\|',$execmem)) {
+                chomp($result);
+	        print LOG "Dissecting line: $result\n" if ($D > 5);
+                if ($result =~ m/MIB::(\w+)\.0 = INTEGER:\s+(\d+)/) {
+                   $memhash{$1} = $2;
+                   print LOG "Update: \t$1 ==> $2\n" if ($D > 5);
+                }
+             }
+          }
+       } else {
+           # HAS SOLARIS 10/ZFS snmpd extension
+          foreach $result (@memwalk) {
+             chomp($result);
+	     next if ($result =~ m/\|\|/);
+             if ($result =~ m/MIB::(\w+)\.0 = INTEGER:\s+(\d+)/) {
+                $memhash{$1} = $2;
+                print LOG "\t$1 ==> $2\n" if ($D > 5);
+             }
+          }
+       }
+    }
+
+	#  SOLARIS DOES NOT SET THESE TWO:
+    $memhash{memBuffer} = 0  if (! $memhash{memBuffer});
+    $memhash{memCached} = 0  if (! $memhash{memCached});
+
+	#  MEMORY CONSUMED:
+    $usedram = $memhash{memTotalReal} - $memhash{memAvailReal} - $memhash{memBuffer} - $memhash{memCached};
+    $mempercentused = int(($usedram / $memhash{memTotalReal}) * 100);
+
+	#  MEMORY AVAILABLE:
+    $freeram = $memhash{memAvailReal} + $memhash{memBuffer} + $memhash{memCached};
+    $mempercentfree = int(($freeram / $memhash{memTotalReal}) * 100);
+ 
+    $totalram = int($memhash{memTotalReal} / 1000);
+
+    if ($freeram eq "" || $usedram eq "") { 
+       print "RAM ERROR: Unexpected SNMP results\n";
+       close(LOG) if ($D > 0);
+       exit $ERRORS{'UNKNOWN'};
+    }
+
+	# SNMP results are in KB (divide by 1000 for MB)
+    $usedram = int($usedram / 1000);
+    $freeram = int($freeram / 1000);
+
+    print LOG "RAM % used: $mempercentused\n    % free: $mempercentfree\n" if ($D > 0);
+    print LOG "RAM used: $usedram\n    free: $freeram\n" if ($D > 0);
+    print LOG "    warn: ${WARNING}$WP\n    crit: ${CRITICAL}$CP\n" if ($D > 0);
+
+    if ($OPTION eq 'below') {
+		#  ALARM IF RAM DROPS BELOW THE THRESHOLD INDICATED:
+       print LOG "Checking to see if memory free falls below warning (${WARNING}$WP) or critical (${CRITICAL}$CP) levels\n" if ($D > 2);
+       $compare = $freeram;
+       if ($CP eq '%') {
+          $compare = $mempercentfree;
+	  $result = "${compare}% ($freeram of $totalram MB) free";
+       } else {
+	  $result = "${compare} MB (${mempercentfree}% of $totalram MB) free";
+       }
+       if ($compare < $CRITICAL) {
+          print "RAM CRITICAL - $result|'RAM below $CP'=${compare}$CP;$WARNING;$CRITICAL;\n";
+          close(LOG) if ($D > 0);
+          exit $ERRORS{'CRITICAL'};
+       }
+
+       $compare = $freeram;
+       if ($WP eq '%') {
+          $compare = $mempercentfree;
+	  $result = "${compare}% ($freeram of $totalram MB) free";
+       } else {
+	  $result = "${compare} MB (${mempercentfree}% of $totalram MB) free";
+       }
+       if ($compare < $WARNING) {
+          print "RAM WARNING - $result|'RAM below $WP'=${compare}$WP;$WARNING;$CRITICAL;\n";
+          close(LOG) if ($D > 0);
+          exit $ERRORS{'WARNING'};
+       }
+
+       print "RAM OK - $result|'RAM below $WP'=${compare}$WP;$WARNING;$CRITICAL;\n";
+          close(LOG) if ($D > 0);
+       exit $ERRORS{'OK'};
+
+    } else {
+		#  ALARM IF RAM RISES ABOVE THE THRESHOLD INDICATED:
+       print LOG "Checking to see if memory used rises above warning (${WARNING}$WP) or critical (${CRITICAL}$CP) levels\n" if ($D > 2);
+       $compare = $usedram;
+       if ($CP eq '%') {
+          $compare = $mempercentused;
+	  $result = "${compare}% ($usedram of $totalram MB) used";
+       } else {
+	  $result = "${compare} MB (${mempercentused}% of $totalram MB) used";
+       }
+       if ($compare > $CRITICAL) {
+          print "RAM CRITICAL - $result|'RAM above $CP'=${compare}$CP;$WARNING;$CRITICAL;\n";
+          close(LOG) if ($D > 0);
+          exit $ERRORS{'CRITICAL'};
+       }
+
+       $compare = $usedram;
+       if ($WP eq '%') {
+          $compare = $mempercentused;
+	  $result = "${compare}% ($usedram of $totalram MB) used";
+       } else {
+	  $result = "${compare} MB (${mempercentused}% of $totalram MB) used";
+       }
+       if ($compare > $WARNING) {
+          print "RAM WARNING - $result|'RAM above $WP'=${compare}$WP;$WARNING;$CRITICAL;\n";
+          close(LOG) if ($D > 0);
+          exit $ERRORS{'WARNING'};
+       }
+
+       print "RAM OK - $result|'RAM above $WP'=${compare}$WP;$WARNING;$CRITICAL;\n";
+          close(LOG) if ($D > 0);
+       exit $ERRORS{'OK'};
+    
+    }
+}
+
+my ($freeswap, $usedswap);
+my $totalswap = 0;
+  # 'SwapIn','UCD-SNMP-MIB::ssSwapIn.0',
+  # 'SwapOut','UCD-SNMP-MIB::ssSwapOut.0',
+  # 'TotalSwap','UCD-SNMP-MIB::memTotalSwap.0',
+  # 'AvailSwap','UCD-SNMP-MIB::memAvailSwap.0',
+  # 'memTotalReal','UCD-SNMP-MIB::memTotalReal.0',
+  # 'memAvailReal','UCD-SNMP-MIB::memAvailReal.0',
+  # 'memTotalFree','UCD-SNMP-MIB::memTotalFree.0'
+
+
+if ($program =~ m/swap/) {
+    $result = `$SNMPDIR/snmpget -v2c -mALL -t 1 -r 4 -c $PASS $HOST $OID{AvailSwap}`;
+	# 	"UCD-SNMP-MIB::memAvailSwap.0 = INTEGER: 2093440 kB" 	
+    print LOG "Result of snmpget (avail swap): \n\t$result\n" if ($D > 3);
+    if ($result !~ m/INTEGER/) {
+		# NO-GO ON SNMP, TRY SSH:
+       print LOG "No love on SNMP, trying SSH\n" if ($D > 3);
+       $result = `/usr/bin/ssh $HOST '/usr/sbin/swap -s'`;
+       print LOG "SSH result: \n\t$result" if ($D > 3);
+		#	total: 39976k bytes allocated + 0k reserved = 39976k used, 1008600k available
+       if ($result !~ m/total/) {
+          print LOG "Rats, SSH failed too, bailing out.\n" if ($D > 3);
+		# NOPE, NO SSH EITHER -- JUST HANG IT UP...
+          print "SWAP ERROR: Unexpected SNMP results\n";
+          close(LOG) if ($D > 0);
+          exit $ERRORS{'UNKNOWN'};
+       }
+	#  GOT SSH RESULT, MAKE IT LOOK LIKE SNMP RESULT FOR CONSISTENT PROCESSING LATER:
+	$totalswap = "$1" if ($result =~ m/(\d+)k used/); 
+        $result = "INTEGER: $1" if ($result =~ m/(\d+)k avail/); 
+        $totalswap = $totalswap + $1 if ($result =~ m/INTEGER: (\d+)/); 
+        print LOG "SSH end result = total: $totalswap, avail: $result\n" if ($D > 3);
+    } else {
+	#  WE DID GET A VALID SNMP RESPONSE, NOW ASK FOR TOTAL SWAP:
+	#  	UCD-SNMP-MIB::memTotalSwap.0 = INTEGER: 2097144 kB
+	$totalswap = `$SNMPDIR/snmpget -v2c -mALL -t 1 -r 4 -c $PASS $HOST $OID{TotalSwap}`;
+	$totalswap = "$1" if ($result =~ m/INTEGER:\s*(\d+)/);
+        print LOG "Result of snmpget (total swap): \n\t$totalswap\n" if ($D > 3);
+    }
+
+    if ($totalswap < 1) {
+          print LOG "OOPS: swap=$totalswap\n      free: $freeswap\n      warn: $WARNING\n      critical: $CRITICAL\n" if ($D> 0);
+          print "SWAP ERROR: Unexpected SNMP results\n";
+          close(LOG) if ($D > 0);
+          exit $ERRORS{'UNKNOWN'};
+    }
+
+    chomp($result);
+    $freeswap = $1 if ($result =~ m/INTEGER: (\d+)/); 
+	# SWAP comes back in kB (divide by 1000 for MB)
+    $freeswap = int($freeswap / 1000);
+
+    chomp($totalswap);
+    $totalswap = int($totalswap / 1000);
+
+    print LOG "SWAP free: $freeswap\n     total: $totalswap\n" if ($D> 0);
+
+  if ($WP eq '%') {
+    if ($WARNING < 10) {
+      $WARNING = ".0$WARNING";
+    } else {
+      $WARNING = ".$WARNING";
+    }
+    $WARNING = int($totalswap * $WARNING);
+    print LOG "     warning: $WARNING\n" if ($D> 0);
+  } 
+  if ($CP eq '%') {
+    if ($CRITICAL < 10) {
+      $CRITICAL = ".0$CRITICAL";
+    } else {
+      $CRITICAL = ".$CRITICAL";
+    }
+    $CRITICAL = int($totalswap * $CRITICAL);
+    print LOG "     critical: $CRITICAL\n" if ($D> 0);
+  }
+  	# CHECK RESULTS
+  if ($freeswap < $CRITICAL) {
+    print "SWAP CRITICAL - $freeswap MB free|SWAP=${freeswap}MB;$WARNING;$CRITICAL;0;\n";
+     close(LOG) if ($D > 0);
+    exit $ERRORS{'CRITICAL'};
+  }
+  if ($freeswap < $WARNING) {
+    print "SWAP WARNING - $freeswap MB free|SWAP=${freeswap}MB;$WARNING;$CRITICAL;0;\n";
+     close(LOG) if ($D > 0);
+    exit $ERRORS{'WARNING'};
+  }
+  print "SWAP OK - $freeswap MB free|SWAP=${freeswap}MB;$WARNING;$CRITICAL;0;\n";
+     close(LOG) if ($D > 0);
+  exit $ERRORS{'OK'};
+}
+
+if ($program =~ m/cpu/) {
+
+  print LOG "Went into check cpu subroutine\n" if ($D > 0);
+  if ($WP ne '%' || $CP ne '%') {
+    &usage();
+     close(LOG) if ($D > 0);
+    exit $ERRORS{'UNKNOWN'};
+  }
+  my ($cpuuser, $cpusys, $cpuidle);
+  @memwalk = `$SNMPDIR/snmpwalk -v2c -mALL -t 1 -r 3 -c $PASS $HOST UCD-SNMP-MIB::systemStats`;
+  foreach $result (@memwalk) {
+       chomp($result);
+       $cpuuser = $1 if ($result =~ m/MIB::ssCpuUser.0 = INTEGER:\s+(\d+)/);
+       $cpusys = $1 if ($result =~ m/MIB::ssCpuSystem.0 = INTEGER:\s+(\d+)/);
+       $cpuidle = $1 if ($result =~ m/MIB::ssCpuIdle.0 = INTEGER:\s+(\d+)/);
+  }
+  if (! $cpuuser && ! $cpusys && ! $cpuidle) {
+		# NO-GO ON SNMP, TRY SSH:
+       $result = `/usr/bin/ssh $HOST 'vmstat 1 2 | tail -1'`;
+       if ($result =~ m/(\d+)\s+(\d+)\s+(\d+)$/) {
+	  $cpuuser = $1;
+	  $cpusys = $2;
+	  $cpuidle = $3;
+       } else {
+		# NOPE, NO SSH EITHER -- JUST HANG IT UP...
+          print "CPU ERROR: SNMP Connection Problem\n";
+          close(LOG) if ($D > 0);
+          exit $ERRORS{'UNKNOWN'};
+       }
+  }
+  if ($cpuidle < $CRITICAL) {
+    print "CPU CRITICAL - user=${cpuuser}%, sys=${cpusys}%, idle=${cpuidle}% |User=${cpuuser}% Sys=${cpusys}% Idle=${cpuidle}%;$WARNING;$CRITICAL\n";
+     close(LOG) if ($D > 0);
+    exit $ERRORS{'CRITICAL'};
+  }
+  if ($cpuidle < $WARNING) {
+    print "CPU WARNING - user=${cpuuser}%, sys=${cpusys}%, idle=${cpuidle}% |User=${cpuuser}% Sys=${cpusys}% Idle=${cpuidle}%;$WARNING;$CRITICAL\n";
+     close(LOG) if ($D > 0);
+    exit $ERRORS{'WARNING'};
+  }
+  print "CPU OK - user=${cpuuser}%, sys=${cpusys}%, idle=${cpuidle}% |User=${cpuuser}% Sys=${cpusys}% Idle=${cpuidle}%;$WARNING;$CRITICAL\n";
+     close(LOG) if ($D > 0);
+  exit $ERRORS{'OK'};
+}
+
+my ($warn1, $warn5, $warn15, $crit1, $crit5, $crit15);
+
+if ($program =~ m/load/) {
+  if ($WP eq '%' || $CP eq '%') {
+    &usage();
+     close(LOG) if ($D > 0);
+    exit $ERRORS{'UNKNOWN'};
+  }
+  print LOG "Warning is $WARNING\nCritical is $CRITICAL\n" if ($D > 0);
+  ($warn1,$warn5,$warn15) = split('\,',$WARNING);
+  ($crit1,$crit5,$crit15) = split('\,',$CRITICAL);
+  print LOG "Warning is now $warn1/$warn5/$warn15\n" if ($D > 0);
+  print LOG "Critical is now $crit1/$crit5/$crit15\n" if ($D > 0);
+
+  my ($load1, $load5, $load15);
+  @memwalk = `$SNMPDIR/snmpwalk -v2c -mALL -t 1 -r 3 -c $PASS $HOST UCD-SNMP-MIB::laLoad`;
+  foreach $result (@memwalk) {
+       chomp($result);
+       $load1 = $1 if ($result =~ m/MIB::laLoad.1 = STRING:\s+(.*)/);
+       $load5 = $1 if ($result =~ m/MIB::laLoad.2 = STRING:\s+(.*)/);
+       $load15 = $1 if ($result =~ m/MIB::laLoad.3 = STRING:\s+(.*)/);
+  }
+
+  if (! $load1 && ! $load5 && ! $load15) {
+		# NO-GO ON SNMP, TRY SSH:
+       $result = `/usr/bin/ssh $HOST 'uptime'`;
+       if ($result =~ m/average: (.*), (.*), (.*)$/) {
+	  $load1 = $1;
+	  $load5 = $2;
+	  $load15 = $3;
+       } else {
+		# NOPE, NO SSH EITHER -- JUST HANG IT UP...
+          print "LOAD ERROR: SNMP Connection Problem\n";
+          close(LOG) if ($D > 0);
+          exit $ERRORS{'UNKNOWN'};
+       }
+  }
+  if ($load1 > $crit1 || $load5 > $crit5 || $load15 > $crit15) {
+    print "LOAD CRITICAL - $load1, $load5, $load15 |load1=$load1;$warn1;$crit1;0 load5=$load5;$warn5;$crit5;0 load15=$load15;$warn15;$crit15;0\n";
+     close(LOG) if ($D > 0);
+    exit $ERRORS{'CRITICAL'};
+  }
+  if ($load1 > $warn1 || $load5 > $warn5 || $load15 > $warn15) {
+    print "LOAD WARNING - $load1, $load5, $load15 |load1=$load1;$warn1;$crit1;0 load5=$load5;$warn5;$crit5;0 load15=$load15;$warn15;$crit15;0\n";
+     close(LOG) if ($D > 0);
+    exit $ERRORS{'WARNING'};
+  }
+  print "LOAD OK - $load1, $load5, $load15 |load1=$load1;$warn1;$crit1;0 load5=$load5;$warn5;$crit5;0 load15=$load15;$warn15;$crit15;0\n";
+  close(LOG) if ($D > 0);
+  exit $ERRORS{'OK'};
+}
+
+#### USAGE SUBROUTINE ####
+
+sub usage {
+  my ($msg1, $msg2);
+  my $msg3 = '';
+
+  print LOG "Went into usage subroutine\n" if ($D > 0);
+
+  if ($0 =~ m/cpu/) {
+    $msg1 = '(Unsupported - you must define a percentage)';
+    $msg2 = '(alert if cpu % idle drops below this)';
+  }
+  if ($0 =~ m/swap/) {
+    $msg1 = '(alert if free swap (MB) drops below this)';
+    $msg2 = '(alert if % of swap free drops below this)';
+  }
+  if ($0 =~ m/load/) {
+    $msg1 = "(alert if system load rises above this)\n                 - use n,n,n to denote 1,5,15 minute load averages";
+    $msg2 = '(Unsupported - you cannot define a percentage)';
+  }
+  if ($0 =~ m/ram/) {
+    $msg1 = '(alert if memory used goes above/below this threshold (in MBytes))';
+    $msg2 = '(alert if memory used goes above/below this percentage)';
+    $msg3 = '-o above|below  Alarm if memory [used goes above] or [free drops below] threshold';
+  }
+
+print <<"EOF";
+
+$0 version $VERSION last updated $UPDATE
+
+ * OVERVIEW *
+This utility was written 10/25/2004 as a method for automating
+the collection of SNMP based information, for the ultimate goal
+of pushing the result to Nagios.
+
+ * USAGE *
+
+$0 ARGS
+                 
+ARGS:
+-v 		Print version and exit
+-h		Print this help message
+-d n		Turn debug on at level n (1-3)
+-H 		SNMP (remote) host to poll
+-w n		Warning level $msg1
+   n%		Warning level $msg2
+-c n		Critical level 
+   n%		Critical level 
+-p 		SNMP Community password on remote host
+$msg3
+
+All options can be prefixed with a single or double "-".
+All options are case sensitive and only eval the first character
+	(e.g. --debug is the same as --d, -d, -debug)
+
+EOF
+close(LOG) if ($D > 0);
+exit $ERRORS{'OK'};
+}
+
