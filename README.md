@@ -27,10 +27,53 @@ setenforce 0
 ```
 yum install epel-release
 ```
-3. Add the Icinga2 Official Repository and install Icinga2 as well as the latest nagios plugins package. 
+3. Add the Icinga2 Official Repository, install Icinga2, and install the latest Nagios plugins package.  
 ```
 rpm --import https://packages.icinga.com/icinga.key
 yum install https://packages.icinga.com/epel/icinga-rpm-release-7-latest.noarch.rpm
 yum install icinga2 nagios-plugins-all
 ```
-5. Install and start 
+4. Start Icinga2. 
+```
+systemctl enable icinga2 --now
+```
+5. Install and start mariaDB (MySQL).
+```
+yum install mariadb-server mariadb
+systemctl enable mariadb --now
+# Optional, but highly recommended
+mysql_secure_installation
+```
+6. Install the Icinga2 IDO Modules for MySQL.
+```
+yum install icinga2-ido-mysql
+```
+7. Create a database for the Icinga2 IDO Modules and import the Icinga2 IDO Schema into the database. 
+```
+mysql -u root -p
+# Inside MariaDB (MySQL)
+# Feel free to substitute your own database names/passwords
+MariaDB> CREATE DATABASE icinga2;
+MariaDB> GRANT ALL PRIVILEGES ON icinga2.* TO icinga2@localhost IDENTIFIED BY 'icinga123';
+MariaDB> FLUSH PRIVILEGES;
+MariaDB> EXIT;
+# Outside of MariaDB
+mysql icinga2 < /usr/share/icinga2-ido-mysql/schema/mysql.sql
+```
+8. Enable necessary features in Icinga2.
+```
+icinga2 feature enable ido-mysql command
+```
+9. Configure the firewall.
+```
+firewall-cmd --permanent --add-port=5665/tcp --zone=public
+firewall-cmd --reload
+```
+10. (CHPC/SNMP Specific) Copy files to correct locations to allow for better SNMP-based monitoring.
+```
+
+```
+11. Restart Icinga2.
+```
+systemctl restart icinga2
+```
