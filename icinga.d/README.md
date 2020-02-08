@@ -10,15 +10,15 @@ For the purposes of CHPC monitoring, we chose (at this time) to do agentless mon
 
 As an alternative, I've created a script which can be run using the following commands (requires root):
 ```
-git clone https://github.com/andrewtakeshi/chpc ./chpc
-cd chpc/icinga_config.d
+git clone https://github.com/andrewtakeshi/bmi.git ./bmi
+cd bmi/icinga.d
 chmod +x icingacombined_setup
 ./icingacombined_setup
 ```
 
-If for whatever reason the script fails or you want to manually follow the steps, do the following (requires root/sudo access). 
+If for whatever reason the script fails or you want to manually follow the steps, do the following (requires root/sudo access): 
 
-1. Disable SELinux - with SELinux enabled, we are unable to run most CheckCommands. 
+1. Disable SELinux; with SELinux enabled, we are unable to run most CheckCommands. The sed command replaces the line 'SELINUX=...' with 'SELINUX=disabled' in /etc/selinux/config. You can change this manually if you would prefer to do so.
 ```
 sed -i 's/^SELINUX=[[:alpha:]]\+$/SELINUX=disabled/' /etc/selinux/config
 setenforce 0
@@ -55,7 +55,6 @@ mysql -u root -p
 # Feel free to substitute your own database names/passwords
 MariaDB> CREATE DATABASE icinga2;
 MariaDB> GRANT ALL PRIVILEGES ON icinga2.* TO icinga2@localhost IDENTIFIED BY 'icinga123';
-MariaDB> FLUSH PRIVILEGES;
 MariaDB> EXIT;
 # Outside of MariaDB
 mysql icinga2 < /usr/share/icinga2-ido-mysql/schema/mysql.sql
@@ -69,11 +68,78 @@ icinga2 feature enable ido-mysql command
 firewall-cmd --permanent --add-port=5665/tcp --zone=public
 firewall-cmd --reload
 ```
-10. (CHPC/SNMP Specific) Copy files to correct locations to allow for better SNMP-based monitoring.
+10. Set up IDO MySQL connection.
 ```
+# Run this
+printf "object IdoMysqlConnection \"ido-mysql\" {\n\tuser = \"icinga2\",\n\tpassword=\"icinga123\",\n\thost=\"localhost\",\n\tdatabase = \"icinga2\"\n}" > /etc/icinga2/features-enabled/ido-mysql.conf
 
+# You can also use this to replace the contents of /etc/icinga2/features-enabled/ido-mysql.conf. 
+
+# Copy this to /etc/icinga2/features-enabled/ido-mysql.conf:
+object IdoMysqlConnection "ido-mysql" {
+  user="icinga2"
+  password="icinga123"
+  host="localhost"
+  database="icinga2"
+}
 ```
-11. Restart Icinga2.
+11. (CHPC/SNMP Specific) Copy files to correct locations to allow for better SNMP-based monitoring.
+```
+cp -r custom_scripts/* /usr/lib64/nagios/plugins
+```
+12. Restart Icinga2.
 ```
 systemctl restart icinga2
 ```
+
+At this point, Icinga2 is set up. The setup of IcingaWeb2 is completely optional, as IcingaWeb2 is just a way of visualizing Icinga2.
+
+If you wish to install IcingaWeb2, do the following:
+
+1. Enable the SCL Repository.
+```
+yum install centos-release-scl
+```
+2. Install required PHP packages (used for visualization in IcingaWeb2).
+```
+yum install rh-php71-php-json rh-php71-php-pgsql rh-php71-php-xml rh-php71-php-intl rh-php71-php-common rh-php71-php-pdo rh-php71-php-mysqlnd rh-php71-php-cli rh-php71-php-mbstring rh-php71-php-fpm rh-php71-php-gd rh-php71-php-zip rh-php71-php-ldap rh-php71-php-imagick
+```
+3. Modify php.ini to have the correct time zone. A list of supported time zones can be found [here](https://www.php.net/manual/en/timezones.php). The command below sets the time zone to America/Denver, but this can easily be changed by modifying the command.
+```
+sed -in 's/;date.timezone/date.timezone=America\/Denver/g'
+```
+4. Enable and start php-fpm. 
+```
+systemctl enable rh-php71-php-fpm --now
+```
+5. Install icingaweb, icingacli, and httpd, and enable httpd. 
+```
+yum install -y icingaweb2 icingacli httpd
+systemctl enable httpd --now
+```
+6. Open the firewall to allow web access.
+```
+firewall-cmd --permanent --add-service=http --zone=public
+firewall-cmd --reload
+```
+7. Modify group settings.
+```
+groupadd -r icingaweb2
+usermod -a -G icingaweb2 apache
+```
+8. 
+```
+icingacli setup config directory --group icingaweb2
+systemctl restarthttpd rh-php71-php-fpm
+```
+9. 
+```
+mysql -u root -p
+# Inside MariaDB (MySQL)
+# Feel free to substitute your own database names/passwords
+MariaDB> CREATE DATABASE icingawebdb;
+MariaDB> GRANT ALL PRIVILEGES ON icingawebdb.* TO icingaweb@localhost IDENTIFIED BY 'icinga123';
+MariaDB> FLUSH PRIVILEGES;
+MariaDB> EXIT;
+```
+
