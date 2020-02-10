@@ -16,6 +16,7 @@ chmod +x icingacombined_setup
 ./icingacombined_setup
 ```
 
+### Icinga2 Manual Installation
 If for whatever reason the script fails or you want to manually follow the steps, do the following (requires root/sudo access): 
 
 1. Disable SELinux; with SELinux enabled, we are unable to run most CheckCommands. The sed command replaces the line 'SELINUX=...' with 'SELINUX=disabled' in /etc/selinux/config. You can change this manually if you would prefer to do so.
@@ -25,13 +26,13 @@ setenforce 0
 ```
 2. Add the epel-release repository.
 ```
-yum install epel-release
+yum install -y epel-release
 ```
 3. Add the Icinga2 Official Repository, install Icinga2, and install the latest Nagios plugins package.  
 ```
 rpm --import https://packages.icinga.com/icinga.key
-yum install https://packages.icinga.com/epel/icinga-rpm-release-7-latest.noarch.rpm
-yum install icinga2 nagios-plugins-all
+yum install -y https://packages.icinga.com/epel/icinga-rpm-release-7-latest.noarch.rpm
+yum install -y icinga2 nagios-plugins-all
 ```
 4. Start Icinga2. 
 ```
@@ -39,14 +40,15 @@ systemctl enable icinga2 --now
 ```
 5. Install and start mariaDB (MySQL).
 ```
-yum install mariadb-server mariadb
+yum install -y mariadb-server mariadb
 systemctl enable mariadb --now
+
 # Optional, but highly recommended
 mysql_secure_installation
 ```
 6. Install the Icinga2 IDO Modules for MySQL.
 ```
-yum install icinga2-ido-mysql
+yum install -y icinga2-ido-mysql
 ```
 7. Create a database for the Icinga2 IDO Modules and import the Icinga2 IDO Schema into the database. 
 ```
@@ -70,12 +72,13 @@ firewall-cmd --reload
 ```
 10. Set up IDO MySQL connection.
 ```
-# Run this
+# Run this, assuming no changes to database names/passwords were made. 
 printf "object IdoMysqlConnection \"ido-mysql\" {\n\tuser = \"icinga2\",\n\tpassword=\"icinga123\",\n\thost=\"localhost\",\n\tdatabase = \"icinga2\"\n}" > /etc/icinga2/features-enabled/ido-mysql.conf
 
 # You can also use this to replace the contents of /etc/icinga2/features-enabled/ido-mysql.conf. 
+# This again assumes no changes to database names/passwords were made. 
 
-# Copy this to /etc/icinga2/features-enabled/ido-mysql.conf:
+# Copy this to /etc/icinga2/features-enabled/ido-mysql.conf: 
 object IdoMysqlConnection "ido-mysql" {
   user="icinga2"
   password="icinga123"
@@ -94,19 +97,21 @@ systemctl restart icinga2
 
 At this point, Icinga2 is set up. The setup of IcingaWeb2 is completely optional, as IcingaWeb2 is just a way of visualizing Icinga2. As a side note, IcingaWeb2 is set up to communicate with Icinga2 through the Icinga2 API. There are other methods of communication available, but the API is the recommended method of communication. 
 
+### IcingaWeb2 Manual Installation
+
 If you wish to install IcingaWeb2, do the following:
 
 1. Enable the SCL Repository.
 ```
-yum install centos-release-scl
+yum install -y centos-release-scl
 ```
 2. Install required PHP packages (used for visualization in IcingaWeb2).
 ```
-yum install rh-php71-php-json rh-php71-php-pgsql rh-php71-php-xml rh-php71-php-intl rh-php71-php-common rh-php71-php-pdo rh-php71-php-mysqlnd rh-php71-php-cli rh-php71-php-mbstring rh-php71-php-fpm rh-php71-php-gd rh-php71-php-zip rh-php71-php-ldap rh-php71-php-imagick
+yum install -y rh-php71-php-json rh-php71-php-pgsql rh-php71-php-xml rh-php71-php-intl rh-php71-php-common rh-php71-php-pdo rh-php71-php-mysqlnd rh-php71-php-cli rh-php71-php-mbstring rh-php71-php-fpm rh-php71-php-gd rh-php71-php-zip rh-php71-php-ldap rh-php71-php-imagick
 ```
-3. Modify php.ini to have the correct time zone. A list of supported time zones can be found [here](https://www.php.net/manual/en/timezones.php). The command below sets the time zone to America/Denver, but this can easily be changed by modifying the command.
+3. Modify php.ini to have the correct time zone. A list of supported time zones can be found [here](https://www.php.net/manual/en/timezones.php). The command below sets the time zone to America/Denver, but this can easily be modified to the correct time zone. 
 ```
-sed -in 's/;date.timezone/date.timezone=America\/Denver/g'
+sed -in 's/;date.timezone=/date.timezone = America\/Denver/g' /etc/opt/rh/rh-php71/php.ini
 ```
 4. Enable and start php-fpm. 
 ```
