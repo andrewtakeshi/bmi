@@ -2,7 +2,7 @@
 
 # SUMMARY: To get cpu, ram, load, swap info via snmp for Nagios
 
-use lib '/usr/local/nagios/libexec';
+use lib '/usr/lib64/nagios/plugins';
 use utils qw(%ERRORS);
 use strict;
 
