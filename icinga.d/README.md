@@ -92,7 +92,7 @@ cp -r custom_scripts/* /usr/lib64/nagios/plugins
 systemctl restart icinga2
 ```
 
-At this point, Icinga2 is set up. The setup of IcingaWeb2 is completely optional, as IcingaWeb2 is just a way of visualizing Icinga2.
+At this point, Icinga2 is set up. The setup of IcingaWeb2 is completely optional, as IcingaWeb2 is just a way of visualizing Icinga2. As a side note, IcingaWeb2 is set up to communicate with Icinga2 through the Icinga2 API. There are other methods of communication available, but the API is the recommended method of communication. 
 
 If you wish to install IcingaWeb2, do the following:
 
@@ -122,17 +122,14 @@ systemctl enable httpd --now
 firewall-cmd --permanent --add-service=http --zone=public
 firewall-cmd --reload
 ```
-7. Modify group settings.
+7. Modify group settings and do some initial setup. 
 ```
 groupadd -r icingaweb2
 usermod -a -G icingaweb2 apache
-```
-8. 
-```
 icingacli setup config directory --group icingaweb2
-systemctl restarthttpd rh-php71-php-fpm
+systemctl restart httpd rh-php71-php-fpm
 ```
-9. 
+9. Create the IcingaWeb2 database. 
 ```
 mysql -u root -p
 # Inside MariaDB (MySQL)
@@ -142,4 +139,14 @@ MariaDB> GRANT ALL PRIVILEGES ON icingawebdb.* TO icingaweb@localhost IDENTIFIED
 MariaDB> FLUSH PRIVILEGES;
 MariaDB> EXIT;
 ```
+10. Setup Icinga2 API to allow communication to IcingaWeb2.
+```
+icinga2 api setup
+systemctl restart icinga2
+PASS=$(grep password /etc/icinga2/conf.d/api-users.conf -m 1 | sed 's/.*"\(.*\)".*/\1/g')
+TOKEN=$(icingacli setup token create)
+```
+12. Assuming that no default settings were changed, the following settings can be used to finish setting up IcingaWeb2. This is accessible at [http://localhost/icingaweb2](http://localhost/icingaweb2). 
+```
 
+```
