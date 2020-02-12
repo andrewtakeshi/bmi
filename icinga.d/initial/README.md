@@ -11,9 +11,9 @@ For the purposes of CHPC monitoring, we chose (at this time) to do agentless mon
 As an alternative, I've created a script which can be run using the following commands (requires root):
 ```
 git clone https://github.com/andrewtakeshi/bmi.git ./bmi
-cd bmi/icinga.d
-chmod +x icingacombined_setup
-./icingacombined_setup
+cd bmi/icinga.d/initial
+chmod +x icinga_setup
+./icinga_setup
 ```
 
 ### Icinga2 Manual Installation
