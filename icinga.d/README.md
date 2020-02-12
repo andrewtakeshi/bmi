@@ -151,7 +151,7 @@ systemctl restart icinga2
 PASS=$(grep password /etc/icinga2/conf.d/api-users.conf -m 1 | sed 's/.*"\(.*\)".*/\1/g')
 TOKEN=$(icingacli setup token create)
 ```
-12. Assuming that no default settings were changed, the following settings can be used to finish setting up IcingaWeb2. This is accessible at [http://localhost/icingaweb2](http://localhost/icingaweb2). 
+12. Assuming that no default settings were changed, run the following to get the settings required for finishing setup of IcingaWeb2. IcingaWeb2 is accessible at [http://localhost/icingaweb2](http://localhost/icingaweb2). 
 ```
 printf "Setup Token:\n\t$TOKEN\n" &&                                                                                                                       
 printf "Database Resource:\n\tdb name = icingawebdb\n\tuser = icingaweb\n\tpassword = icinga123\n" &&                                                 
