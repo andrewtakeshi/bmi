@@ -86,8 +86,15 @@ object IdoMysqlConnection "ido-mysql" {
   database="icinga2"
 }
 ```
-11. (CHPC/SNMP Specific) Copy files to correct locations to allow for better SNMP-based monitoring.
+11. (CHPC/SNMP Specific) Copy files to correct locations to allow for better SNMP-based monitoring. These allow us to easily monitor things like RAM, CPU, and swap usage via SNMP. There are also scripts for checking the number of running processes, and for checking if specific processes are running. 
 ```
+# Clone the git repo, if not already done.
+git clone https://github.com/andrewtakeshi/bmi.git
+
+# Go to the correct directory
+cd bmi/icinga.d/
+
+# Copy the scripts over. 
 cp -r custom_scripts/* /usr/lib64/nagios/plugins
 ```
 12. Restart Icinga2.
