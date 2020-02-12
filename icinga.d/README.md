@@ -153,5 +153,8 @@ TOKEN=$(icingacli setup token create)
 ```
 12. Assuming that no default settings were changed, the following settings can be used to finish setting up IcingaWeb2. This is accessible at [http://localhost/icingaweb2](http://localhost/icingaweb2). 
 ```
-
+printf "Setup Token:\n\t$TOKEN\n"                                                                                                                       
+printf "Database Resource:\n\tdb name = icingawebdb\n\tuser = icingaweb\n\tpassword = icinga123\n"                                                            
+printf "IDO Resource:\n\tdb name = icinga2\n\tuser = icinga2\n\tpassword = icinga123\n"                                                                      
+printf "API Configuration:\n\thost = localhost\n\tuser = root\n      $PASS\n" 
 ```
