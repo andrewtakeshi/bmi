@@ -92,7 +92,7 @@ object IdoMysqlConnection "ido-mysql" {
 git clone https://github.com/andrewtakeshi/bmi.git
 
 # Go to the correct directory
-cd bmi/icinga.d/
+cd bmi/icinga.d/initial
 
 # Copy the scripts over. 
 cp -r custom_scripts/* /usr/lib64/nagios/plugins
