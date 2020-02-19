@@ -2,7 +2,7 @@
 
 The "full" subdirectory contains examples of the services, commands, and (anonymized) hosts that we use at CHPC.
 
-This is by no means a comprehensive guide; for more information, view the Icinga2 documentation. However, it should make a very quick and easy way to check 
+This is by no means a comprehensive guide; for more information, view the [Icinga2 documentation](https://icinga.com/docs/icinga2/latest/doc/04-configuration/).
 
 ## General Information
 
@@ -28,7 +28,7 @@ object Host "<host_display_name>" {
 
 ## Templates
 
-- By default, located in `/etc/icinga2/conf.d/templates.conf`. As with hosts, these can 
+- By default, located in `/etc/icinga2/conf.d/templates.conf`.
 - Templates give Icinga2 a huge amount of power and make adding new hosts fast and easy. As the name suggests, they contain a template for a type of host. For example, this is the default generic-host template provided by Icinga2:
 ```
 template Host "generic-host" {
@@ -47,3 +47,46 @@ object Host "<host_name>" {
   # Optional variables for check commands, apply statements, etc. 
 }
 ```
+- Templates can be configured for hosts, services, notifications, etc. 
+
+## Commands
+- By default, commands are located in `/etc/icinga2/conf.d/commands.conf`
+- Commands are what we use to configure new services/checks. As an example, we're going to walk through the process of adding [check_num_procs_snmp.sh](https://github.com/andrewtakeshi/bmi/blob/master/icinga.d/initial/custom_scripts/check_num_procs_snmp.sh) to our system. check_num_procs_snmp.sh is a simple bash script which uses SNMP to check the number of currently running processes on a remote machine. I wrote it as a way to explore both SNMP based monitoring and implement Nagios Plugin standards; it should be legible enough to recreate and modify to fit other simple SNMP based monitoring tasks. 
+
+```
+object CheckCommand "snmp_num_procs" {
+  command = [ PluginDir + "/check_num_procs_snmp.sh" ]
+  
+  arguments = {
+  "-t" = "$addr$"
+  "-c" = "$comm$"
+  "-W" = "$warn$"
+  "-C" = "$crit$"
+  }
+}
+```
+
+- The command name, "snmp_num_procs" will be used when setting up the service. 
+- `command = ...` specifies the location of the script. In my installation, check_num_procs_snmp.sh is located at `/usr/lib64/nagios/plugins/check_num_procs_snmp.sh`. `PluginDir` refers to the first part of this, `/usr/lib64/nagios/plugins`, and is automatically configured by Icinga2. Constants can be modified or added in `/etc/icinga2/conf.d/constants.conf`, as detailed in the documentation. 
+- `arguments = { ... }` is a dictionary corresponding to the script arguments. Because this script uses SNMP v2, it requires an IP address `(-t:addr)` and a community string `(-c:comm)`. Additionally, as a Nagios script it has configurable warning `(-W:warn)` and critical thresholds `(-C:crit)`. 
+
+## Services
+- By default, services are located in `/etc/icinga2/conf.d/services.conf`
+- Services are applied to hosts and are what actually run the commands (at least in my understanding).
+- Continuing with the example from the **Commands** section:
+```
+apply Service "num-procs" {
+  import "generic-service"
+  
+  vars.addr = host.address
+  vars.comm = host.vars.commstr
+  vars.warn = host.vars.procs_warn
+  vars.crit = host.vars.procs_crit
+  vars.check_command = "procs"
+  
+  check_command = "snmp_num_procs"
+  
+  assign where host.vars.os == "linux"
+}
+```
+
