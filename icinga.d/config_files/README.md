@@ -2,8 +2,10 @@
 
 The "full" subdirectory contains examples of the services, commands, and (anonymized) hosts that we use at CHPC.
 
-This is by no means a comprehensive guide; for more information, view the [Icinga2 documentation](https://icinga.com/docs/icinga2/latest/doc/04-configuration/).
-
+This is by no means a comprehensive guide; for more information, view the Icinga2 documentation:
+ - [Configuration](https://icinga.com/docs/icinga2/latest/doc/04-configuration/).
+ - [Monitoring Basics](https://icinga.com/docs/icinga2/latest/doc/03-monitoring-basics/)
+ 
 ## General Information
 
 - By default, Icinga2 recursively includes all files ending with `.conf` inside of `/etc/icinga2/conf.d`. This enables users to rename or add configuration files to suit their preferences.
@@ -69,6 +71,8 @@ object CheckCommand "snmp_num_procs" {
 - The command name, "snmp_num_procs" will be used when setting up the service. 
 - `command = ...` specifies the location of the script. In my installation, check_num_procs_snmp.sh is located at `/usr/lib64/nagios/plugins/check_num_procs_snmp.sh`. `PluginDir` refers to the first part of this, `/usr/lib64/nagios/plugins`, and is automatically configured by Icinga2. Constants can be modified or added in `/etc/icinga2/conf.d/constants.conf`, as detailed in the documentation. 
 - `arguments = { ... }` is a dictionary corresponding to the script arguments. Because this script uses SNMP v2, it requires an IP address `(-t:addr)` and a community string `(-c:comm)`. Additionally, as a Nagios script it has configurable warning `(-W:warn)` and critical thresholds `(-C:crit)`. 
+  - In this instance, all of the arguments obtain their values from variables. It should be possible to use constants instead. 
+  - As will be shown in the next section, the value of the variables is set in the services section. 
 
 ## Services
 - By default, services are located in `/etc/icinga2/conf.d/services.conf`
@@ -89,4 +93,10 @@ apply Service "num-procs" {
   assign where host.vars.os == "linux"
 }
 ```
+- `vars.*` is a dictionary. The left side corresponds to command arguments (i.e. `addr, comm, warn, crit` are all found in the `snmp_num_procs` command defined above). We can assign values to these variables here (i.e. `vars.crit = 500` is a valid configuration), or, as shown in the example, we can assign values based on host variables. 
+  - The use of host variables allows us to create host templates for host groups. Inside the template, we can define all the variables needed for hosts of this type; if necessary, these variables can be overridden inside individual host definitions, but it makes configuration much faster and more powerful.
+- `check_command = ...` tells the service what check command to use. The name here must match a defined CheckCommand object. 
+- `assign where ...` is a quick way of assigning the service to multiple hosts. The assign statement accepts any number of arguments, and arguments can be chained together using && or || boolean operators. Examples include assigning based on hostname matching, membership in a hostgroup, value of a custom variable (as is shown above), etc. The only requisite is that the result of the statement return a boolean value, i.e. `true` or `false`. More information can be found [here](https://icinga.com/docs/icinga2/latest/doc/03-monitoring-basics/#using-apply-services)
+
+
 
