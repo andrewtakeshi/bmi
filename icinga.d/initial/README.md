@@ -1,5 +1,4 @@
 # Icinga2/Icinga Web 2 Setup Guide
-### By: Andrew Golightly
 
 This guide was made assuming a clean install of CentOS 7. Instructions for other distros are available online; here are some of the better resources I was able to find. 
 
@@ -8,15 +7,15 @@ This guide was made assuming a clean install of CentOS 7. Instructions for other
 
 For the purposes of CHPC monitoring, we chose (at this time) to do agentless monitoring via SNMP. As such, we don't make use of many key Icinga features, i.e. Icinga Agent/Icinga Director.
 
-As an alternative, I've created a script which can be run using the following commands (requires root):
+## Script Installation
+I've created a script which can be run using the following commands (requires root):
 ```
 git clone https://github.com/andrewtakeshi/bmi.git ./bmi
 cd bmi/icinga.d/initial
-chmod +x icinga_setup
 ./icinga_setup
 ```
 
-### Icinga2 Manual Installation
+## Icinga2 Manual Installation
 If for whatever reason the script fails or you want to manually follow the steps, do the following (requires root/sudo access): 
 
 1. Disable SELinux; with SELinux enabled, we are unable to run most CheckCommands. The sed command replaces the line 'SELINUX=...' with 'SELINUX=disabled' in /etc/selinux/config. You can change this manually if you would prefer to do so.
@@ -104,7 +103,7 @@ systemctl restart icinga2
 
 At this point, Icinga2 is set up. The setup of IcingaWeb2 is completely optional, as IcingaWeb2 is just a way of visualizing Icinga2. As a side note, IcingaWeb2 is set up to communicate with Icinga2 through the Icinga2 API. There are other methods of communication available, but the API is the recommended method of communication. 
 
-### IcingaWeb2 Manual Installation
+## IcingaWeb2 Manual Installation
 
 If you wish to install IcingaWeb2, do the following:
 
@@ -164,4 +163,37 @@ printf "Setup Token:\n\t$TOKEN\n" &&
 printf "Database Resource:\n\tdb name = icingawebdb\n\tuser = icingaweb\n\tpassword = icinga123\n" &&                                                 
 printf "IDO Resource:\n\tdb name = icinga2\n\tuser = icinga2\n\tpassword = icinga123\n" &&                                                        
 printf "API Configuration:\n\thost = localhost\n\tuser = root\n        password = $PASS\n" 
+```
+
+## Remote Device Setup (SNMP)
+Setup/Install using the script (assuming the repo has already been cloned)
+```
+git clone https://github.com/andrewtakeshi/bmi.git ./bmi
+cd bmi/icinga.d/initial
+./snmp_setup
+```
+Alternatively, install manually: 
+
+1. Install SNMP tools, if not already installed.
+```
+sudo yum install -y net-snmp net-snmp-utils
+```
+2. Start and enable the SNMP daemon.
+```
+sudo systemctl enable snmpd --now
+```
+3. For CHPC, we need access to the host-resources-mib and the ucd-snmp-mib. These MIBs should be installed along with net-snmp-utils, but they need to be enabled for query with the following command:
+```
+sudo echo "view systemview included .1.3.6.1.2.1.25" >> /etc/snmp/snmpd.conf
+sudo echo "view systemview included .1.3.6.1.4.1.2021" >> /etc/snmp/snmpd.conf
+sudo systemctl restart snmpd 
+```
+4. Check to see if the changes have been applied successfully with the following command. If the ucd-snmp-mib is loaded properly, it will print 'SUCCESS'. Otherwise, it will print 'FAIL'. This assumes the use of SNMP V2, with 'public' as the community string. 
+```
+snmpget -v 2c -c public localhost laLoad.1 | grep -q "STRING" && echo "SUCCESS" || echo "FAIL"
+```
+5. Open the firewall to allow for access from the Icinga master (or other SNMP agents):
+```
+sudo firewall-cmd --add-service=snmp --zone=public --permanent
+sudo firewall-cmd --reload
 ```
