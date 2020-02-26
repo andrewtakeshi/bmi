@@ -166,6 +166,8 @@ printf "API Configuration:\n\thost = localhost\n\tuser = root\n        password 
 ```
 
 ## Remote Device Setup (SNMP)
+This section contains instructions for setting up SNMP to work on remote nodes; this section doesn't apply to the master (device on which Icinga2 is installed), unless you're also monitoring the master from itself. 
+
 Setup/Install using the script (assuming the repo has already been cloned)
 ```
 git clone https://github.com/andrewtakeshi/bmi.git ./bmi
