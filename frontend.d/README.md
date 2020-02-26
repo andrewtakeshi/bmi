@@ -38,5 +38,9 @@ firewall-cmd --add-port={3000,8086,8088}/tcp --zone=public --permanent
 firewall-cmd --reload
 ```
 4. Install the InfluxDB Writer for Icinga2
+```
+icinga2 feature enable influxdb
+```
+
 
 
