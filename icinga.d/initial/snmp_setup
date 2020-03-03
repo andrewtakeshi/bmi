@@ -12,7 +12,7 @@ systemctl status snmpd | grep -q "active (running)" && : || yum install -y net-s
 echo "view systemview included .1.3.6.1.2.1.25" >> /etc/snmp/snmpd.conf
 echo "view systemview included .1.3.6.1.4.1.2021" >> /etc/snmp/snmpd.conf
 
-systemctl enable snmpd --now > /dev/null 2>&1
+systemctl status snmpd | grep -q "active (running)" && systemctl restart snmpd || systemctl enable snmpd --now > /dev/null 2>&1
 
 sudo firewall-cmd --add-service=snmp --zone=public --permanent > /dev/null 2>&1
 sudo firewall-cmd --reload > /dev/null 2>&1
