@@ -14,6 +14,7 @@ gpgcheck=1
 gpgkey=https://packages.grafana.com/gpg.key
 sslverify=1
 sslcacert=/etc/pki/tls/certs/ca-bundle.crt
+EOF
 
 sudo yum install -y grafana
 sudo systemctl enable grafana-server --now
@@ -79,5 +80,7 @@ Then, restart Icinga2.
 ```
 systemctl restart icinga2
 ```
+7. Go to the Grafana homepage; this will be located at <host ip>:3000. Then, add the InfluxDB datasource. 
+  
 
 
