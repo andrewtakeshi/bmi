@@ -1,6 +1,6 @@
 # Icinga2/Icinga Web 2 Setup Guide
 
-This guide was made assuming a clean install of CentOS 7. Instructions for other distros are available online; here are some of the better resources I was able to find. 
+This guide was made assuming a clean install of CentOS 7 and the use of firewalld instead of iptables. Instructions for other distros are available online; here are some of the better resources I was able to find. 
 
 - [Official Icinga Installation Guide](https://icinga.com/docs/icinga2/latest/doc/02-installation/)
 - [Debian/Ubuntu (Computing for Geeks)](https://computingforgeeks.com/how-to-install-icinga2-monitoring-tool-on-ubuntu-18-04-lts/)
@@ -8,7 +8,7 @@ This guide was made assuming a clean install of CentOS 7. Instructions for other
 For the purposes of CHPC monitoring, we chose (at this time) to do agentless monitoring via SNMP. As such, we don't make use of many key Icinga features, i.e. Icinga Agent/Icinga Director.
 
 ## Script Installation
-I've created a script which can be run using the following commands (requires root):
+I've created a script which can be run using the following commands (requires root). Again, this script assumes the use of firewalld. If you are using iptables instead, the script will fail and you will need to go through the manual setup; right now I don't do any error checking in the script, so if it fails at any point it's pretty hard to tell. This should be added in the future, but for now it's been tested and shown to work on clean installs of CentOS 7 with firewalld as the firewall; other configurations haven't been tested and may or may not work (but iptables is known to cause failure).
 ```
 git clone https://github.com/andrewtakeshi/bmi.git ./bmi
 cd bmi/icinga.d/initial
