@@ -80,7 +80,14 @@ Then, restart Icinga2.
 ```
 systemctl restart icinga2
 ```
-7. Go to the Grafana homepage; this will be located at <host ip>:3000. Then, add the InfluxDB datasource. 
+7. Go to the Grafana homepage; this will be located at \<host ip\>:3000. Login; by default the credentials are admin/admin, but you will be required to change the password upon the first login. After successfully logging in, add the InfluxDB datasource by going to Configuration > Data Sources > Add New Data Source. Select InfluxDB from the list of possible data sources. In all of my testing, I ran InfluxDB and Grafana on the same server. With this setup, the settings are as follows:
+  - URL: http://localhost:8086
+  - Access: Server
+  - All toggles unchecked
+  - Database: \<database name\> (step 5)
+  - Username: \<database username\> (step 5)
+  - Password: \<database password\> (step 5)
+Save and test the connection; it should be able to connect without any issues. If it's unable to connect, make sure the username/password is correct for the InfluxDB database and that the firewall is permitting traffic to 8086/tcp. 
   
 
 
