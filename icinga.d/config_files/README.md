@@ -98,5 +98,5 @@ apply Service "num-procs" {
 - `check_command = ...` tells the service what check command to use. The name here must match a defined CheckCommand object. 
 - `assign where ...` is a quick way of assigning the service to multiple hosts. The assign statement accepts any number of arguments, and arguments can be chained together using && or || boolean operators. Examples include assigning based on hostname matching, membership in a hostgroup, value of a custom variable (as is shown above), etc. The only requisite is that the result of the statement return a boolean value, i.e. `true` or `false`. More information can be found [here](https://icinga.com/docs/icinga2/latest/doc/03-monitoring-basics/#using-apply-services)
 
-
-
+## Other Object Types
+There are a variety of other object types; however, the documentation on these other object types is fairly self-explanatory, and can be found [here](https://icinga.com/docs/icinga2/latest/doc/09-object-types/). 
