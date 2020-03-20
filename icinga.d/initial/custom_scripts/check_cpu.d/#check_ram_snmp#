@@ -1,0 +1,46 @@
+#!/bin/bash
+
+print_help() {
+    printf "This is a tool developed to properly poll the amount of free RAM on Linux machines.\n\n"
+    printf "Usage: ./check_ram_snmp ARGS\n"
+    printf "ARGS:\n"
+    printf "\t-h: Print this help dialog."
+    printf "\t-H: Specify SNMP (remote) host to poll"
+    printf "\t-w: Specify warning level % (alert if memory used goes above this threshold)"
+    printf "\t-c: Specify critical level % (alert if memory used goes above this threshold)"
+    printf "\t-p: SNMP Community password on remote host"
+}
+
+# Processes the arguments - there are 3, one for community string (assuming v2c for now)
+# and another for the process name.
+while getopts "h:H:w:c:p:" opt; do
+    case $opt in
+	h)
+	    print_help()
+	    exit 1
+            ;;
+        H)
+            HOST=$OPTARG
+            ;;
+	w)
+	    WARN=$OPTARG
+	    ;;
+	c)
+	    CRIT=$OPTARG
+	    ;;
+	p)
+	    COMMUNITY=$OPTARG
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 3
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument." >&2
+            exit 3
+            ;;
+    esac
+done
+
+avail=$(snmpget -v2c -c $COMMUNITY $HOST memTotalReal)
+
+used=$(snmpget -v

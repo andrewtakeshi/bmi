@@ -1,0 +1,12 @@
+#!/bin/bash
+
+print_help() {
+    printf "This is a tool developed to properly poll the amount of free RAM on Linux machines.\n\n"
+    printf "Usage: ./check_ram_snmp ARGS\n"
+    printf "ARGS:\n"
+    printf "\t-h: Print this help dialog."
+    printf "\t-H: Specify SNMP (remote) host to poll"
+    printf "\t-w: Specify warning level % (alert if memory used goes above this threshold)"
+    printf "\t-c: Specify critical level % (alert if memory used goes above this threshold)"
+    printf "\t-p: SNMP Community password on remote host"
+}
